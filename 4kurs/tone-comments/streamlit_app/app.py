@@ -21,7 +21,7 @@ def load_models():
     
     with open("tokenizer_bin.pkl", "rb") as f:
         tokenizer_bin = pickle.load(f)
-    with open("tokenizer_mul.pkl", "rb") as f:
+    with open("tokenizer_mult.pkl", "rb") as f:
         tokenizer_mul = pickle.load(f)
     
     return model_bin, model_mul, tokenizer_bin, tokenizer_mul
@@ -61,7 +61,8 @@ if predict_button:
         
         st.subheader("Вероятности по классам тональности:")
         for cls, prob in zip(classes, mul_probs):
-            st.progress(prob)
+            st.write(f"{cls}: {prob:.2f}")
+            st.progress(float(prob))
 
         if toxic_prob > 0.5:
             st.error("⚠ Этот комментарий токсичный!")
