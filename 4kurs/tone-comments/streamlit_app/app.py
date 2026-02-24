@@ -1,70 +1,52 @@
 import streamlit as st
-import numpy as np
-import pickle
-from tensorflow.keras.models import load_model
-from tensorflow.keras.preprocessing import sequence
+import requests
+import pandas as pd
 
+API_URL = "http://localhost:8000/api"
 
-st.set_page_config(
-    page_title="Анализ комментариев",
-    layout="centered",
-    initial_sidebar_state="collapsed"
-)
-
+st.set_page_config(page_title="Анализ комментариев", layout="centered")
 st.title("💬 Анализ комментариев")
-st.write("Введите комментарий, чтобы проверить токсичность и определить тональность.")
 
-@st.cache_resource
-def load_models():
-    model_bin = load_model("lstm_binary.keras")
-    model_mul = load_model("lstm_multiclass.keras")
-    
-    with open("tokenizer_bin.pkl", "rb") as f:
-        tokenizer_bin = pickle.load(f)
-    with open("tokenizer_mult.pkl", "rb") as f:
-        tokenizer_mul = pickle.load(f)
-    
-    return model_bin, model_mul, tokenizer_bin, tokenizer_mul
+# Ввод комментария
+comment = st.text_area("Введите комментарий:", height=100)
+save_to_db = st.checkbox("💾 Сохранить в БД", value=True)
 
-model_bin, model_mul, tokenizer_bin, tokenizer_mul = load_models()
-
-MAX_LEN = 80
-
-def preprocess(text, tokenizer):
-    text = text.lower().replace("ё", "е")
-    text_seq = tokenizer.texts_to_sequences([text])
-    text_pad = sequence.pad_sequences(text_seq, maxlen=MAX_LEN)
-    return text_pad
-
-comment = st.text_area("Введите комментарий:", height=120)
-
-predict_button = st.button("🔮 Предсказать")
-
-if predict_button:
-    if comment.strip() == "":
-        st.warning("Пожалуйста, введите комментарий для анализа.")
+if st.button("🔮 Предсказать"):
+    if not comment.strip():
+        st.warning("Введите текст комментария!")
     else:
-        x_bin = preprocess(comment, tokenizer_bin)
-        toxic_prob = model_bin.predict(x_bin)[0][0]
-        toxic_label = "Токсичный" if toxic_prob > 0.5 else "Не токсичный"
-        
-        x_mul = preprocess(comment, tokenizer_mul)
-        mul_probs = model_mul.predict(x_mul)[0]
-        classes = ["Normal", "Insult", "Threat", "Obscenity"]
-        top_idx = np.argmax(mul_probs)
-        mul_label = classes[top_idx]
-        mul_confidence = mul_probs[top_idx]
-        
-        st.subheader("Результаты анализа:")
-        st.markdown(f"**Токсичность:** {toxic_label} ({toxic_prob:.2f})")
-        st.markdown(f"**Тип комментария:** {mul_label} ({mul_confidence:.2f})")
-        
-        st.subheader("Вероятности по классам тональности:")
-        for cls, prob in zip(classes, mul_probs):
-            st.write(f"{cls}: {prob:.2f}")
-            st.progress(float(prob))
-
-        if toxic_prob > 0.5:
-            st.error("⚠ Этот комментарий токсичный!")
-        else:
-            st.success("✅ Комментарий безопасен")
+        try:
+            response = requests.post(
+                f"{API_URL}/analyze",
+                json={"comment_text": comment, "save_to_db": save_to_db},
+                timeout=30
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                
+                st.subheader("📊 Результаты")
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.metric("Токсичность", data["toxic_label"], f"{data['toxic_probability']:.2%}")
+                
+                with col2:
+                    st.metric("Категория", data["category"], f"{data['confidence']:.2%}")
+                
+                st.subheader("Вероятности по классам")
+                for cls, prob in data["all_probabilities"].items():
+                    st.write(f"{cls.capitalize()}: {prob:.2%}")
+                    st.progress(prob)
+                
+                if data["is_toxic"]:
+                    st.error("⚠ Комментарий токсичный!")
+                else:
+                    st.success("✅ Комментарий безопасен")
+                
+                if save_to_db:
+                    st.info(f"✅ Сохранено: toxic_id={data['comment_id_toxic']}, multiclass_id={data['comment_id_multiclass']}")
+            else:
+                st.error(f"Ошибка API: {response.status_code}")
+        except Exception as e:
+            st.error(f"Ошибка подключения: {str(e)}")
